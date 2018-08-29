@@ -1,0 +1,10 @@
+## Interface: 11200
+## Title: iFinder
+## Notes: Utility for group finding
+## Author: toinetoine
+## Version: 0.0.1
+
+iFinder.lua
+iFinder.xml
+iFinderConstants.lua
+Utilities.lua
