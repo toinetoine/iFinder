@@ -1,21 +1,20 @@
 iFinder = {};
 Constants = getglobal("Constants")
 Utils = getglobal("Utils")
--- ifinder
---      Messages : {instance id => {name => "stored message ;:; time"} }
---      IncludeChinese : include chinese messasges
+iFinder.Messages = {}
+iFinder.ScrollPosition = 0
 
+-- iFinder
+--      Messages : {{sender = "character", time = 123, message = "LF1M dps BRD Lava runs", instance = "Blackrock Depths", frame = 0x123, lineElements = {0x4567, ...}
 --      iFinderFrame (UI) : 
 --          InstanceListFrame
 --          MessageListFrame
 
 function iFinder.OnLoad()
-    iFinder.Messages = {};
     iFinder.SelectedInstances = {};
+    iFinder.shownMessageCount = 0; -- number of messages shown in the message lists
     this:RegisterEvent("ADDON_LOADED");
     this:RegisterEvent("CHAT_MSG_CHANNEL");
-    -- this:RegisterEvent("PLAYER_REGEN_ENABLED");
-    -- this:RegisterEvent("PLAYER_REGEN_DISABLED");
 end
 
 function iFinder.OnEvent(event)
@@ -24,14 +23,46 @@ function iFinder.OnEvent(event)
         local messagerName = arg2
         -- arg1 message, arg2 name, arg9 channel
         for _, lfmToken in pairs(Constants.LFM_ARGS) do
-            messageText = "黑石深渊---来治疗和坦克, 3=2"
-            if Utils.subStringCount(messageText, lfmToken, false) > 0 then
+            if Utils.containsWord(messageText, lfmToken, false) then
                 for instanceName, instanceObj in pairs(Constants.INSTANCES) do
                     if Utils.containsValueInTable(iFinder.SelectedInstances, instanceName) then
                         for _, alias in pairs(instanceObj.aka) do
-                            if Utils.subStringCount(messageText, alias, false) > 0 then
-                                iFinder.Messages[messagerName] = {time = math.floor(GetTime()), message = messageText, instance = instanceName}
-                                createMessageListElement(iFinderFrame.MessageListFrame, instanceName, messageText, messagerName, nil, iFinderFrame.MessageListFrame:GetNumChildren())
+                            if Utils.containsWord(messageText, alias, false) then
+                                -- messageText = alias .. '| ' .. messageText
+                                local splitMessage = Utils.splitString(messageText, 82)
+
+                                local index = Utils.containsPairInStructsTable(iFinder.Messages, "sender", messagerName)
+                                if index == nil then
+                                    local newMessageListElement, messageLinesElements = createMessageListElement(iFinderFrame.MessageListFrame, instanceName, splitMessage, messagerName, nil)
+                                    table.insert(iFinder.Messages, {sender = messagerName, time = math.floor(GetTime()), message = splitMessage, instance = "Dire Maul", frame = newMessageListElement, lineElements = messageLinesElements})
+                                else
+                                    -- remove the message element from the list frame, update with changes, then re-add it at the first position
+                                    local existingMessage = iFinder.Messages[index]
+                                    table.remove(iFinder.Messages, index)
+
+                                    for lineIndex, lineElement in ipairs(existingMessage.lineElements) do
+                                        if lineIndex <= table.getn(splitMessage) then
+                                            lineElement:SetText(splitMessage[lineIndex])
+                                        else
+                                            lineElement:SetText("") -- set left over line elements to blank
+                                        end
+                                    end
+
+                                    -- if need additional line elements for the updated string, create them
+                                    for lineIndex, lineText in ipairs(splitMessage) do
+                                        if lineIndex > table.getn(existingMessage.lineElements) then
+                                            createMessageLineElement(existingMessage.frame, lineText, lineIndex, Constants.LINE_HEIGHT, "YELLOW")
+                                        end
+                                    end
+
+                                    existingMessage.message = splitMessage
+                                    existingMessage.time = math.floor(GetTime())
+                                    existingMessage.instance = instanceName
+
+                                    table.insert(iFinder.Messages, 1, existingMessage)
+                                end
+
+                                reDrawMessageFrame(0)
                                 return
                             end
                         end
@@ -45,6 +76,39 @@ function iFinder.OnEvent(event)
         createMinimapButton();
         createFinderWindow();
     end
+end
+
+function reDrawMessageFrame(delta)
+    if arg1 == 1 and iFinder.ScrollPosition < table.getn(iFinder.Messages) then
+        iFinder.ScrollPosition = iFinder.ScrollPosition + 1
+    elseif arg1 == -1 and iFinder.ScrollPosition > 0 then
+        iFinder.ScrollPosition = iFinder.ScrollPosition - 1
+    end
+
+    local totalMessagesHeight = 0
+    local reversedMessages = Utils.reverseTable(iFinder.Messages)
+
+    for index, message in pairs(iFinder.Messages) do
+        message.frame:Hide()
+    end
+
+    local totalHeight = 0
+    for index, message in pairs(reversedMessages) do
+        -- starting at the scroll position, populate the message list frame
+        if index >= iFinder.ScrollPosition then
+            totalHeight = totalHeight + message.frame:GetHeight()
+
+            if totalHeight > iFinderFrame.MessageListFrame:GetHeight() then
+                break -- stop drawing when the message list frame is fully populated
+            end
+
+            message.frame:Hide()
+            message.frame:SetPoint("TOPLEFT", iFinderFrame.MessageListFrame, "TOPLEFT", 0, -1*totalMessagesHeight)
+            message.frame:Show()
+            totalMessagesHeight = totalMessagesHeight + message.frame:GetHeight()
+        end
+    end
+    return totalMessagesHeight
 end
 
 
@@ -145,7 +209,7 @@ function createFinderWindow()
     }
 
     iFinderFrame = CreateFrame("Frame","iFinderFrame",UIParent)
-    iFinderFrame:SetWidth(700)
+    iFinderFrame:SetWidth(1200)
     iFinderFrame:SetHeight(600)
     iFinderFrame:ClearAllPoints()
     iFinderFrame:SetPoint("CENTER", UIParent,"CENTER") 
@@ -213,8 +277,19 @@ function createFinderWindow()
         end
     end)
 
+    local scrollframe = CreateFrame("ScrollFrame", "messageListScrollbar", iFinderFrame) -- "UIPanelScrollFrameTemplate"
+    scrollframe:SetPoint("LEFT", iFinderFrame, "LEFT", iFinderFrame.InstanceListFrame:GetWidth() + 8, -9)
+    scrollframe:SetBackdrop(iFinder.frameBackdrop)
+    scrollframe:SetBackdropColor(20/255, 20/255, 20/255, 0.9)
+    scrollframe:SetWidth(iFinderFrame:GetWidth() - iFinderFrame.InstanceListFrame:GetWidth() - 8 - 4)
+    scrollframe:SetHeight(iFinderFrame:GetHeight() - 45)
+    scrollframe:EnableMouseWheel(true)
+    scrollframe:SetScript("OnMouseWheel", function(this, change)
+        reDrawMessageFrame(arg1)
+    end)
+
     -- create message list frame
-    iFinderFrame.MessageListFrame = CreateFrame("ScrollFrame","iFinderMessageListFrame", iFinderFrame)
+    iFinderFrame.MessageListFrame = CreateFrame("ScrollFrame", "iFinderMessageListFrame", iFinderFrame)
     iFinderFrame.MessageListFrame:ClearAllPoints()
     iFinderFrame.MessageListFrame:SetPoint("LEFT", iFinderFrame, "LEFT", iFinderFrame.InstanceListFrame:GetWidth() + 8, -9)
     iFinderFrame.MessageListFrame:SetFrameLevel(iFinderFrame:GetFrameLevel()+1) 
@@ -223,50 +298,84 @@ function createFinderWindow()
     iFinderFrame.MessageListFrame:EnableMouseWheel(true)
     iFinderFrame.MessageListFrame:SetBackdrop(iFinder.frameBackdrop)
     iFinderFrame.MessageListFrame:SetBackdropColor(20/255, 20/255, 20/255, 0.9)
+
+    scrollframe:SetScrollChild(iFinderFrame.MessageListFrame)
 end
 
 function createButton(text, name, textSize, parentFrame)
     newButton = CreateFrame("Button", name, parentFrame, "UIPanelButtonTemplate2")
-    -- newButton:SetFrameLevel(100)
     newButton:SetText(text)
-    newButton:SetHeight(newButton:GetTextHeight())
     newButton:SetWidth(newButton:GetTextWidth())
-    newButton:SetFont("Fonts\\FRIZQT__.TTF", textSize)
+    newButton:SetHeight(newButton:GetTextHeight())
     return newButton
 end
 
-function createMessageListElement(parentFrame, instanceName, text, playerName, tags, index)
-    -- if the message list frame is full: delete the oldest message
-    newMessageHeight = 16
-    newMessageY = -1*newMessageHeight*index - 10
-    _, __, ___, ____, messageListY = iFinderFrame.MessageListFrame:GetPoint()
-    if newMessageY < messageListY - iFinderFrame.MessageListFrame:GetHeight() then
-        -- TODO: resize
-        DEFAULT_CHAT_FRAME:AddMessage('|c00ffff00' .. 'message element OVERFLOWING' .. ' |r');
+function createMessageLineElement(parentFrame, text, lineNumber, lineHeight, color)
+    local messageLineStringElement = parentFrame:CreateFontString(nil, "ARTWORK")
+    messageLineStringElement:SetFont("Interface\\AddOns\\iFinder\\media\\simhei.TTF", 18)
+    messageLineStringElement:SetText(text)
+    messageLineStringElement:SetTextColor(Constants.COLORS[color][1], Constants.COLORS[color][2], Constants.COLORS[color][3])
+    messageLineStringElement:SetWidth(parentFrame:GetWidth() - 100)
+    messageLineStringElement:SetHeight(lineHeight)
+    messageLineStringElement:SetJustifyH("LEFT")
+    messageLineStringElement:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 6, -1*(lineNumber - 1)*lineHeight)
+    return messageLineStringElement
+end
+
+function createMessageListElement(parentFrame, instanceName, messageLines, playerName, tags, yCoord)
+    local newMessageElementFrame = CreateFrame("Frame", nil, parentFrame)
+    newMessageElementFrame:SetWidth(parentFrame:GetWidth())
+    newMessageElementFrame:SetHeight(table.getn(messageLines) * Constants.LINE_HEIGHT)
+    newMessageElementFrame:SetWidth(parentFrame:GetWidth() - 100)
+    newMessageElementFrame:EnableMouse(true)
+
+    -- local color = "YELLOW"
+    -- if math.mod(iFinder.shownMessageCount, 2) == 1 then
+    --     color = "WHITE"
+    -- end
+
+    local messageLineElements = {}
+    for lineNumber, messageLine in ipairs(messageLines) do
+        local messageLineStringElement = createMessageLineElement(newMessageElementFrame, messageLine, lineNumber, Constants.LINE_HEIGHT, "YELLOW")
+        
+        -- local messageLineStringElement = newMessageElementFrame:CreateFontString(nil, "ARTWORK")
+        -- messageLineStringElement:SetFont("Interface\\AddOns\\iFinder\\media\\simhei.TTF", 18)
+        -- messageLineStringElement:SetText(messageLine)
+        -- messageLineStringElement:SetTextColor(Constants.COLORS[color][1], Constants.COLORS[color][2], Constants.COLORS[color][3])
+        -- messageLineStringElement:SetWidth(parentFrame:GetWidth() - 100)
+        -- messageLineStringElement:SetHeight(LINE_HEIGHT)
+        -- messageLineStringElement:SetJustifyH("LEFT")
+        -- messageLineStringElement:SetPoint("TOPLEFT", newMessageElementFrame, "TOPLEFT", 6, -1*(lineNumber - 1)*LINE_HEIGHT)
+        table.insert(messageLineElements, messageLineStringElement)
     end
 
-    local newMessageElement = CreateFrame("Button", "messageElement", parentFrame)
-    newMessageElement:SetFont("Interface\\AddOns\\iFinder\\media\\simhei.TTF", 18)
-    newMessageElement:SetText(text)
-    newMessageElement:SetTextColor(Constants.COLORS.YELLOW[1], Constants.COLORS.YELLOW[2], Constants.COLORS.YELLOW[3])
-    newMessageElement:SetWidth(newMessageElement:GetTextWidth())
-    newMessageElement:SetHeight(newMessageHeight) -- height
-    newMessageElement:SetFrameLevel(parentFrame:GetFrameLevel()+1)
-    newMessageElement:EnableMouse(false)
-    newMessageElement:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 6, newMessageY)
+    iFinder.shownMessageCount = iFinder.shownMessageCount + 1
 
-    local replyButton = createButton(" reply ", playerName, 12, parentFrame)
-    replyButton:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 20 + newMessageElement:GetTextWidth(), newMessageY - 2)
+    local replyButton = createButton("  reply  ", playerName, 12, newMessageElementFrame)
+    replyButton:SetPoint("TOPLEFT", newMessageElementFrame, "TOPLEFT", newMessageElementFrame:GetWidth() - 40, -2)
     replyButton:SetScript("OnClick", function()
+        -- close existing visible reply frame (if exists)
+        if replyFrame ~= nil and replyFrame:IsShown() then
+            replyFrame:Hide()
+        end
+        -- if the message recipient is different that the existing one then create new reply frame
+        if replyFrame == nil or tostring(replyFrame:GetName()) ~= playerName then
+            replyFrame = createReplyFrame(parentFrame, x, y, playerName, "Mage 50+")
+            replyFrame:Show()
+        else
+            replyFrame:Hide()
+        end
         -- TODO open reply frame with name of person to default
-        DEFAULT_CHAT_FRAME:AddMessage('|c00ffff00' .. tostring(this:GetName()) .. ' |r');
     end)
+    return newMessageElementFrame, messageLineElements
+end
 
-    return newMessageElement
+function setMessageElementColor(messageElement, color)
+    local portions = {messageElement:GetChildren()}
 end
 
 function createInstanceListElement(parentFrame, text, index)
-    label = parentFrame:CreateFontString(nil, "ARTWORK")
+    local label = parentFrame:CreateFontString(nil, "ARTWORK")
     label:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 6, -1*14*index - 14)
     label:SetFont("Fonts\\FRIZQT__.TTF", 12)
     label:SetText(text)
@@ -274,7 +383,7 @@ function createInstanceListElement(parentFrame, text, index)
     label:SetWidth(label:GetStringWidth())
     label:SetHeight(12)
 
-    checkbox = CreateFrame("CheckButton", text, parentFrame, "UICheckButtonTemplate")
+    local checkbox = CreateFrame("CheckButton", text, parentFrame, "UICheckButtonTemplate")
     checkbox:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", 6 + label:GetWidth() + 4, -1*14*index - 14)
     checkbox:SetHeight(16)
     checkbox:SetWidth(16)
@@ -286,7 +395,6 @@ function createOptionsFrame(parentFrame)
     optionsFrame:SetWidth(300)
     optionsFrame:SetHeight(130)
     optionsFrame:SetPoint("TOP", parentFrame, "TOP", 0, 0)
-    -- optionsFrame:SetPoint("BOTTOM", parentFrame, "TOP", 0, -1 * GetScreenHeight()/3)
     optionsFrame:SetBackdrop(iFinder.frameBackdrop)
     optionsFrame:SetBackdropColor(40/255, 40/255, 40/255, 0.8)
     optionsFrame:EnableMouse(true)
@@ -301,6 +409,148 @@ function createOptionsFrame(parentFrame)
     end)
     optionsFrame:Hide()
     return optionsFrame
+end
+
+function createReplyFrame(parentFrame, xPos, yPos, recipient, defaultMessage)
+    local replyFrame = CreateFrame("Frame", nil, parentFrame)
+    replyFrame:SetWidth(260)
+    replyFrame:SetHeight(80)
+    replyFrame:SetPoint("TOP", parentFrame, "TOP", 0, 0)
+    replyFrame:SetBackdrop(iFinder.frameBackdrop)
+    replyFrame:SetBackdropColor(15/255, 15/255, 15/255, 0.9)
+    replyFrame:EnableMouse(true)
+    replyFrame:SetMovable(true)
+    replyFrame:SetFrameLevel(parentFrame:GetFrameLevel() + 4)
+    replyFrame:SetClampedToScreen(true)
+    replyFrame:SetScript("OnMouseDown", function()
+        this:StartMoving()
+    end)
+    replyFrame:SetScript("OnMouseUp", function()
+        this:StopMovingOrSizing()
+    end)
+
+    local replyFrameClose = CreateFrame("Button", "replyCloseButton", replyFrame, "UIPanelCloseButton")
+    replyFrameClose:SetPoint("TOPRIGHT", replyFrame, "TOPRIGHT", 2, 2)
+    replyFrameClose:SetScript("OnClick", function()
+        this:GetParent():Hide()
+    end)
+
+    -- local replyFrameMsg = CreateFrame("EditBox", nil, replyFrame)
+    -- replyFrameMsg:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", 10, -1*replyFrameClose:GetHeight() - 4)
+    -- replyFrameMsg:SetWidth(replyFrame:GetWidth() - 20)
+    -- replyFrameMsg:SetAutoFocus(false)
+    -- replyFrameMsg:SetFont("Fonts\\FRIZQT__.TTF", 10)
+    -- replyFrameMsg:SetText(tostring(UnitLevel("player")) .. tostring(UnitClass("player")))
+    -- replyFrameMsg:SetTextColor(Constants.COLORS["WHITE"][1], Constants.COLORS["WHITE"][2], Constants.COLORS["WHITE"][3])
+    -- replyFrameMsg:SetMaxLetters(200)
+    -- replyFrameMsg:SetBackdrop(iFinder.frameBackdrop)
+    -- replyFrameMsg:SetBackdropColor(25/255, 25/255, 25/255, 1.0)
+    -- replyFrameMsg:SetMultiLine(true)
+    -- replyFrameMsg:SetTextInsets(5, 5, 5, 0)
+
+    local widthFromLeft = 20
+    local tankTex = replyFrame:CreateTexture(nil, "ARTWORK")
+    tankTex:SetTexture("Interface\\AddOns\\iFinder\\media\\Tank")
+    tankTex:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", widthFromLeft + 2, -8)
+    tankTex:SetWidth(36)
+    tankTex:SetHeight(36)
+    widthFromLeft = widthFromLeft + tankTex:GetWidth() + 2
+
+    local tankCheckbox = CreateFrame("CheckButton", text, replyFrame, "UICheckButtonTemplate")
+    tankCheckbox:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", widthFromLeft + 1, -14)
+    tankCheckbox:SetHeight(20)
+    tankCheckbox:SetWidth(20)
+    widthFromLeft = widthFromLeft + tankCheckbox:GetWidth() + 1
+
+    local healerTex = replyFrame:CreateTexture(nil, "ARTWORK")
+    healerTex:SetTexture("Interface\\AddOns\\iFinder\\media\\Healer")
+    healerTex:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", widthFromLeft + 20, -8)
+    healerTex:SetWidth(36)
+    healerTex:SetHeight(36)
+    widthFromLeft = widthFromLeft + healerTex:GetWidth() + 20
+
+    local healerCheckbox = CreateFrame("CheckButton", text, replyFrame, "UICheckButtonTemplate")
+    healerCheckbox:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", widthFromLeft + 1, -14)
+    healerCheckbox:SetHeight(20)
+    healerCheckbox:SetWidth(20)
+    widthFromLeft = widthFromLeft + healerCheckbox:GetWidth() + 1
+
+    local damageTex = replyFrame:CreateTexture(nil, "ARTWORK")
+    damageTex:SetTexture("Interface\\AddOns\\iFinder\\media\\Damage")
+    damageTex:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", widthFromLeft + 20, -8)
+    damageTex:SetWidth(36)
+    damageTex:SetHeight(36)
+    widthFromLeft = widthFromLeft + damageTex:GetWidth() + 20
+
+    local damageCheckbox = CreateFrame("CheckButton", text, replyFrame, "UICheckButtonTemplate")
+    damageCheckbox:SetPoint("TOPLEFT", replyFrame, "TOPLEFT", widthFromLeft + 1, -14)
+    damageCheckbox:SetHeight(20)
+    damageCheckbox:SetWidth(20)
+    widthFromLeft = widthFromLeft + damageCheckbox:GetWidth() + 1
+
+    replyFrameChineseSend = createButton(" Reply In Chinese ", "replySendButton", 12, replyFrame)
+    replyFrameChineseSend:SetWidth(replyFrameChineseSend:GetTextWidth()+5)
+    replyFrameChineseSend:SetPoint("BOTTOM", replyFrame, "BOTTOM", -60, 8)
+    replyFrameChineseSend:SetScript("OnClick", function()
+        roles = {}
+        if Utils.toboolean(tankCheckbox:GetChecked()) == true then
+            table.insert(roles, "坦克")
+        end
+        if Utils.toboolean(healerCheckbox:GetChecked()) == true then
+            table.insert(roles, "治疗")
+        end
+        if Utils.toboolean(damageCheckbox:GetChecked()) == true then
+            table.insert(roles, "dps")
+        end
+
+        local class = ""
+        if UnitClass("player") == "Warrior" then
+            class = "战士"
+        elseif UnitClass("player") == "Paladin" then
+            class = "圣骑士"
+        elseif UnitClass("player") == "Hunter" then
+            class = "猎人"
+        elseif UnitClass("player") == "Shaman" then
+            class = "萨满"
+        elseif UnitClass("player") == "Rogue" then
+            class = "盗贼"
+        elseif UnitClass("player") == "Druid" then
+            class = "德鲁伊"
+        elseif UnitClass("player") == "Mage" then
+            class = "法师"
+        elseif UnitClass("player") == "Warlock" then
+            class = "术士"
+        elseif UnitClass("player") == "Priest" then
+            class = "牧师"
+        end
+
+        local message = class .. " " .. table.concat(roles, "/")
+        SendChatMessage(message, "WHISPER", nil, recipient)
+        this:GetParent():Hide()
+    end)
+
+    replyFrameSend = createButton(" Reply In English ", "replySendButton", 12, replyFrame)
+    replyFrameSend:SetPoint("BOTTOM", replyFrame, "BOTTOM", 60, 8)
+    replyFrameSend:SetWidth(replyFrameSend:GetTextWidth()+5)
+    replyFrameSend:SetScript("OnClick", function()
+        roles = {}
+        if Utils.toboolean(tankCheckbox:GetChecked()) == true then
+            table.insert(roles, "tank")
+        end
+        if Utils.toboolean(healerCheckbox:GetChecked()) == true then
+            table.insert(roles, "heals")
+        end
+        if Utils.toboolean(damageCheckbox:GetChecked()) == true then
+            table.insert(roles, "dps")
+        end
+        
+        local message = UnitClass("player") .. " " .. table.concat(roles, "/")
+        SendChatMessage(message, "WHISPER", nil, recipient)     
+        this:GetParent():Hide()
+    end)
+
+    replyFrame:Hide()
+    return replyFrame
 end
 
 function showFinder()

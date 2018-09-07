@@ -1,4 +1,5 @@
 Constants = {
+    LINE_HEIGHT = 20,
     COLORS = {
         WHITE = { 247/255,  235/255,  233/255},
         YELLOW = { 209/255,  164/255,  29/255},
@@ -9,12 +10,13 @@ Constants = {
         UNICODE = "iFinder\\simhei.ttf", -- support for chinese simplified characters
     },
     INSTANCES = {
-        	["Sunken Temple"] = {level = 45, aka = {"sunken temple", "sunken", "sunk", "sunkentemple", "神庙"}},
+        	["Sunken Temple"] = {level = 45, aka = { " ST", "sunken temple", "sunken", "sunk", "sunkentemple", "神庙"}},
         	["Blackrock Depths"] = {level = 50, aka = {"blackrock depths", "blackrock dpths", "brd", "lava", "arena", "jailbreak", "黑石深渊"}},
     		["Dire Maul"] = {level = 60, aka = {"dm", "dire maul", "diremaul", "dmw", "dmn", "dme", "dm:w", "dm:n", "dm:e", "tribute", "trib", "厄运"}},
     		["Lower Blackrock Spire"] = {level = 60, aka = {"lower blackrock spire", "lower brs", "lower blackrock", "lbrs", "黑下", "黑石下"}},
     		["Upper Blackrock Spire"] = {level = 60, aka = {"upper blackrock spire", "upper brs", "upper blackrock", "ubrs", "黑上", "黑石上"}},
     		["Stratholme"] = {level = 60, aka = {"stratholme", "strath", "strat", "dk", "斯坦索姆"}},
+            ["Scholomance"] = {level = 60, aka = {"scholomance", "scholo", "schol", "通灵学院"}},
     },
     TOKENS = {
     	["Lava Run"] = {"跳火", "lava", "lava run"},
